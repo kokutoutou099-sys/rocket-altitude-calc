@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#070b18">
+<title>ロケット高度・3D軌道計算</title>
+<style>
+  :root{
+    --bg:#070b18; --panel:rgba(20,28,48,.62); --panel2:rgba(30,40,66,.55);
+    --stroke:rgba(120,150,210,.22); --ink:#eaf0ff; --dim:#93a3c6;
+    --accent:#5ef0c0; --accent2:#8b7bff; --amber:#ffd35a; --danger:#ff6b8a;
+    --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Segoe UI",sans-serif;
+    -webkit-text-size-adjust:100%;}
+  body{min-height:100vh;
+    background:
+      radial-gradient(90% 60% at 15% -5%, #1a2a5a55 0%, #0000 55%),
+      radial-gradient(80% 60% at 100% 0%, #52308a44 0%, #0000 50%),
+      radial-gradient(120% 80% at 50% 120%, #0d3b4a55 0%, #0000 60%),
+      var(--bg);}
+  .wrap{max-width:920px;margin:0 auto;padding:calc(var(--safe-t) + 18px) 16px calc(var(--safe-b) + 40px);}
+  header.hd{display:flex;align-items:center;gap:12px;margin-bottom:6px;}
+  .logo{width:44px;height:44px;border-radius:13px;flex:0 0 auto;
+    background:linear-gradient(150deg,var(--accent),var(--accent2));
+    display:grid;place-items:center;font-size:24px;box-shadow:0 8px 26px #5ef0c033;}
+  h1{font-size:20px;margin:0;letter-spacing:.01em;font-weight:800;}
+  .sub{color:var(--dim);font-size:12.5px;margin:2px 0 0;}
+  .card{background:var(--panel);border:1px solid var(--stroke);border-radius:18px;
+    padding:16px;margin-top:16px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    box-shadow:0 10px 40px #0006;}
+  .card h2{font-size:14px;margin:0 0 10px;color:#cdd8f5;font-weight:700;letter-spacing:.02em;
+    display:flex;align-items:center;gap:8px;}
+  .card h2 .n{width:22px;height:22px;border-radius:7px;background:linear-gradient(150deg,var(--accent2),#6a5cff);
+    display:grid;place-items:center;font-size:12px;color:#fff;font-weight:800;}
+  textarea{width:100%;min-height:120px;resize:vertical;background:#0b1224;color:#dfe7ff;
+    border:1px solid var(--stroke);border-radius:12px;padding:12px;font-size:13px;line-height:1.5;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;}
+  button{font-family:inherit;cursor:pointer;border:none;}
+  .btn{height:46px;padding:0 18px;border-radius:12px;font-size:15px;font-weight:800;
+    background:linear-gradient(150deg,var(--accent),#28c79a);color:#03231b;
+    box-shadow:0 6px 20px #28c79a33;transition:transform .08s;}
+  .btn:active{transform:translateY(1px) scale(.99);}
+  .btn.alt{background:linear-gradient(150deg,var(--accent2),#6a5cff);color:#fff;box-shadow:0 6px 20px #6a5cff33;}
+  .btn.ghost{background:rgba(255,255,255,.06);color:#cdd8f5;border:1px solid var(--stroke);box-shadow:none;}
+  .btn.sm{height:38px;font-size:13px;padding:0 12px;}
+  .hint{color:var(--dim);font-size:12px;line-height:1.65;margin:10px 2px 0;}
+  .hint code{background:#0b1224;border:1px solid var(--stroke);padding:1px 6px;border-radius:6px;font-size:11.5px;}
+
+  /* テーブル */
+  .tblwrap{overflow-x:auto;margin-top:4px;}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:520px;}
+  th,td{padding:8px 8px;border-bottom:1px solid var(--stroke);text-align:right;white-space:nowrap;}
+  th{color:var(--dim);font-weight:600;font-size:11.5px;text-align:right;}
+  th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:center;}
+  td input{width:92px;background:#0b1224;border:1px solid var(--stroke);color:#dfe7ff;
+    border-radius:8px;padding:6px 7px;font-size:13px;text-align:right;font-variant-numeric:tabular-nums;}
+  td input.lbl{width:52px;text-align:center;font-weight:700;}
+  .modechip{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:3px 9px;}
+  .chip-traj{background:#5ef0c022;color:var(--accent);border:1px solid #5ef0c055;}
+  .chip-single{background:#ffd35a22;color:var(--amber);border:1px solid #ffd35a55;}
+
+  /* 結果 */
+  .bigwrap{display:flex;flex-wrap:wrap;gap:14px;align-items:stretch;}
+  .big{flex:1;min-width:180px;background:linear-gradient(150deg,#12203f,#0c1730);
+    border:1px solid var(--stroke);border-radius:16px;padding:16px 18px;}
+  .big .lbl{color:var(--dim);font-size:12px;}
+  .big .v{font-size:38px;font-weight:900;line-height:1.05;margin-top:4px;
+    background:linear-gradient(120deg,var(--accent),#c9b8ff);-webkit-background-clip:text;background-clip:text;color:transparent;
+    font-variant-numeric:tabular-nums;}
+  .big .v small{font-size:16px;color:var(--dim);-webkit-text-fill-color:var(--dim);margin-left:4px;}
+  .big .v2{font-size:20px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;margin-top:14px;}
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px dashed var(--stroke);}
+  .kv .k{color:var(--dim);font-size:12.5px;} .kv .v{font-weight:700;font-variant-numeric:tabular-nums;}
+  .warns{margin-top:12px;display:flex;flex-direction:column;gap:8px;}
+  .warn{background:#ff6b8a18;border:1px solid #ff6b8a55;color:#ffd0da;border-radius:10px;padding:9px 12px;font-size:12.5px;}
+  .warn.ok{background:#5ef0c015;border-color:#5ef0c044;color:#bff6e5;}
+
+  /* 3D */
+  #view3dCard .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
+  canvas#view{width:100%;height:min(64vh,460px);display:block;border-radius:14px;
+    background:radial-gradient(120% 90% at 50% 10%, #0f1d3a 0%, #070d1e 70%);border:1px solid var(--stroke);
+    touch-action:none;cursor:grab;}
+  canvas#view:active{cursor:grabbing;}
+  .leg{display:flex;gap:14px;align-items:center;flex-wrap:wrap;color:var(--dim);font-size:11.5px;margin-top:8px;}
+  .swatch{width:60px;height:8px;border-radius:4px;background:linear-gradient(90deg,#3b82f6,#22d3a7,#ffd35a,#ff6b8a);}
+  .hidden{display:none!important;}
+  footer{color:var(--dim);font-size:11.5px;text-align:center;margin-top:26px;line-height:1.7;}
+  footer a{color:var(--accent);}
+  @media(max-width:560px){ .grid2{grid-template-columns:1fr;} .big .v{font-size:32px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hd">
+    <div class="logo">🛰️</div>
+    <div>
+      <h1>ロケット高度・3D軌道計算</h1>
+      <p class="sub">複数観測点の計測データ（仰角・方位角・GPS）から、飛行軌道を3D復元して最高到達高度を求めます。</p>
+    </div>
+  </header>
+
+  <!-- 入力 -->
+  <section class="card">
+    <h2><span class="n">1</span> 計測データを貼り付け</h2>
+    <textarea id="input" placeholder="計測アプリの「コピー」や CSV/JSON 書き出しを貼り付け（各観測点ぶん）。&#10;JSON配列 / 1行ずつのJSON / CSV いずれもOK。時系列(samples)があれば3D軌道を復元します。"></textarea>
+    <div class="btnrow">
+      <button class="btn" id="parseBtn">解析して取り込む</button>
+      <button class="btn alt sm" id="demoBtn">サンプルを入れて試す</button>
+      <button class="btn ghost sm" id="clearBtn">クリア</button>
+    </div>
+    <p class="hint">対応フィールド：<code>label, lat, lon, elevation_deg, azimuth_deg</code>（＋任意 <code>samples:[{t,el,az}]</code>）。
+      2点以上で計算可・3点以上推奨。時系列があればドリフト（風流れ）込みで正確に、無ければ最高点の1点交会で計算します。</p>
+  </section>
+
+  <!-- 観測点テーブル -->
+  <section class="card hidden" id="tableCard">
+    <h2><span class="n">2</span> 観測点 <span id="modeChip"></span></h2>
+    <div class="tblwrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
+    <div class="btnrow">
+      <button class="btn" id="calcBtn">高度を計算</button>
+      <button class="btn ghost sm" id="addRowBtn">行を追加</button>
+    </div>
+    <p class="hint">「使用」のチェックで各観測点の有効/無効を切替。標高(m)は観測点の海抜差（平地なら0でOK）。
+      単一点モードでは仰角・方位角を直接編集できます。</p>
+  </section>
+
+  <!-- 結果 -->
+  <section class="card hidden" id="resultCard">
+    <h2><span class="n">3</span> 計算結果</h2>
+    <div class="bigwrap">
+      <div class="big"><div class="lbl">最高到達高度（地上高）</div>
+        <div class="v" id="rAlt">–<small>m</small></div>
+        <div class="v2" id="rAltFt" style="color:var(--dim)"></div></div>
+      <div class="big"><div class="lbl">水平ドリフト（打上点→apogee）</div>
+        <div class="v2" id="rDrift" style="font-size:30px;margin-top:8px">–</div>
+        <div class="lbl" style="margin-top:8px">到達時刻/精度</div>
+        <div class="v2" id="rMeta" style="font-size:15px;color:var(--ink)">–</div></div>
+    </div>
+    <div class="grid2" id="kvs"></div>
+    <div class="warns" id="warns"></div>
+  </section>
+
+  <!-- 3Dビュー -->
+  <section class="card hidden" id="view3dCard">
+    <h2><span class="n">4</span> 3D飛行軌道</h2>
+    <div class="bar">
+      <button class="btn ghost sm" id="resetView">視点リセット</button>
+      <button class="btn ghost sm" id="topView">真上から</button>
+      <span class="hint" style="margin:0">ドラッグで回転・ホイール/ピンチで拡大縮小</span>
+    </div>
+    <canvas id="view"></canvas>
+    <div class="leg">
+      <span>高度カラー</span><span class="swatch"></span><span>低 → 高</span>
+      <span>● 観測点</span><span>★ apogee</span>
+    </div>
+  </section>
+
+  <div class="btnrow" style="margin-top:16px">
+    <button class="btn ghost sm" id="copyBtn">結果をコピー</button>
+  </div>
+
+  <footer>
+    計測アプリ：<a id="measLink" href="https://kokutoutou099-sys.github.io/Rocket-altitude/" target="_blank" rel="noopener">Rocket-altitude</a>
+    ／ 多点視線の3次元最小二乗交会＋残差最小化による時刻同期で軌道を復元。
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   数値核（Nodeで検証済み）: 座標変換 / 交会 / 補間 / 時刻同期
+   ============================================================ */
+const D2R=Math.PI/180, R2D=180/Math.PI, Rearth=6371008.8;
+const $=id=>document.getElementById(id);
+const clampNum=(x,a,b)=>Math.max(a,Math.min(b,x));
+
+const llToENU=(lat,lon,lat0,lon0)=>({E:(lon-lon0)*D2R*Rearth*Math.cos(lat0*D2R), N:(lat-lat0)*D2R*Rearth});
+const enuToLL=(E,N,lat0,lon0)=>({lat:lat0+(N/Rearth)*R2D, lon:lon0+(E/(Rearth*Math.cos(lat0*D2R)))*R2D});
+function dirFromAzEl(az,el){const a=az*D2R,e=el*D2R,c=Math.cos(e);return[c*Math.sin(a),c*Math.cos(a),Math.sin(e)];}
+function azElFromVec(dE,dN,dU){const h=Math.hypot(dE,dN);let az=Math.atan2(dE,dN)*R2D;az=((az%360)+360)%360;return{az,el:Math.atan2(dU,h)*R2D};}
+function solve3x3(M,b){const[a,bb,c,d,e,f,g,h,i]=M;const A=e*i-f*h,B=-(d*i-f*g),C=d*h-e*g;const det=a*A+bb*B+c*C;
+  if(Math.abs(det)<1e-9)return{x:null,det};const Dn=-(bb*i-c*h),E=a*i-c*g,F=-(a*h-bb*g),G=bb*f-c*e,H=-(a*f-c*d),I=a*e-bb*d;
+  const v=[A,Dn,G,B,E,H,C,F,I].map(z=>z/det);
+  return{x:[v[0]*b[0]+v[1]*b[1]+v[2]*b[2],v[3]*b[0]+v[4]*b[1]+v[5]*b[2],v[6]*b[0]+v[7]*b[1]+v[8]*b[2]],det};}
+function intersectRays(Ps,Ds){
+  let M=[0,0,0,0,0,0,0,0,0],b=[0,0,0];
+  for(let k=0;k<Ps.length;k++){const d=Ds[k],P=Ps[k];
+    const A=[1-d[0]*d[0],-d[0]*d[1],-d[0]*d[2],-d[1]*d[0],1-d[1]*d[1],-d[1]*d[2],-d[2]*d[0],-d[2]*d[1],1-d[2]*d[2]];
+    for(let j=0;j<9;j++)M[j]+=A[j];
+    b[0]+=A[0]*P[0]+A[1]*P[1]+A[2]*P[2];b[1]+=A[3]*P[0]+A[4]*P[1]+A[5]*P[2];b[2]+=A[6]*P[0]+A[7]*P[1]+A[8]*P[2];}
+  const {x,det}=solve3x3(M,b); if(!x)return null;
+  let ss=0; const ts=[];
+  for(let k=0;k<Ps.length;k++){const d=Ds[k],P=Ps[k],w=[x[0]-P[0],x[1]-P[1],x[2]-P[2]],
+    t=w[0]*d[0]+w[1]*d[1]+w[2]*d[2],p=[w[0]-t*d[0],w[1]-t*d[1],w[2]-t*d[2]];
+    ss+=p[0]*p[0]+p[1]*p[1]+p[2]*p[2]; ts.push(t);}
+  return {x, rms:Math.sqrt(ss/Ps.length), det, ranges:ts};
+}
+function interpAt(S,t){
+  if(!S.length||t<S[0].t||t>S[S.length-1].t)return null;
+  let lo=0,hi=S.length-1; while(hi-lo>1){const m=(lo+hi)>>1; if(S[m].t<=t)lo=m; else hi=m;}
+  const a=S[lo],b=S[hi],f=(b.t===a.t)?0:(t-a.t)/(b.t-a.t);
+  const el=a.el+f*(b.el-a.el);
+  const x=Math.cos(a.az*D2R)+f*(Math.cos(b.az*D2R)-Math.cos(a.az*D2R));
+  const y=Math.sin(a.az*D2R)+f*(Math.sin(b.az*D2R)-Math.sin(a.az*D2R));
+  let az=Math.atan2(y,x)*R2D; az=((az%360)+360)%360;
+  return {el,az};
+}
+function reconstruct(recs,offs,dt){
+  const al=recs.map((r,i)=>r.series.map(s=>({t:s.t-offs[i],el:s.el,az:s.az})));
+  let g0=-Infinity,g1=Infinity;
+  al.forEach(s=>{if(!s.length)return; g0=Math.max(g0,s[0].t); g1=Math.min(g1,s[s.length-1].t);});
+  if(!isFinite(g0)||g1<=g0) return {traj:[],mrms:Infinity};
+  const traj=[]; let ss=0,n=0;
+  for(let t=g0;t<=g1+1e-9;t+=dt){
+    const Ps=[],Ds=[],idx=[];
+    for(let i=0;i<recs.length;i++){const s=interpAt(al[i],t);if(!s)continue;
+      Ps.push(recs[i].P);Ds.push(dirFromAzEl(s.az,s.el));idx.push(i);}
+    if(Ps.length<2)continue;
+    const sol=intersectRays(Ps,Ds); if(!sol)continue;
+    traj.push({t,x:sol.x,rms:sol.rms,k:Ps.length,det:sol.det,ranges:sol.ranges,idx}); ss+=sol.rms*sol.rms;n++;
+  }
+  return {traj,mrms:n?Math.sqrt(ss/n):Infinity};
+}
+// 残差最小化で時刻オフセット推定（ref固定=0、粗→細の窓探索）
+function syncOffsets(recs,refIdx,dtSync){
+  const offs=recs.map(()=>0);
+  const passes=[{step:0.4,win:1.6},{step:0.1,win:0.6},{step:0.02,win:0.16}];
+  for(const {step,win} of passes){
+    for(let iter=0;iter<3;iter++){
+      let improved=false;
+      for(let i=0;i<recs.length;i++){
+        if(i===refIdx||!recs[i].series.length)continue;
+        let best=reconstruct(recs,offs,dtSync).mrms, bestOff=offs[i];
+        for(let d=offs[i]-win;d<=offs[i]+win+1e-9;d+=step){
+          const cand=offs.slice(); cand[i]=d;
+          const m=reconstruct(recs,cand,dtSync).mrms;
+          if(m<best-1e-6){best=m;bestOff=d;improved=true;}
+        }
+        offs[i]=bestOff;
+      }
+      if(!improved)break;
+    }
+  }
+  return offs;
+}
+
+/* ============================================================
+   パーサ（JSON配列 / 改行JSON / CSV / 混在テキストから抽出）
+   ============================================================ */
+function extractRecords(text){
+  const recs=[];
+  const push=o=>{ if(o&&typeof o==='object'&&!Array.isArray(o)) recs.push(o); };
+  // 1) 全体JSON
+  try{ const j=JSON.parse(text); if(Array.isArray(j))j.forEach(push); else push(j);
+       if(recs.length) return normalize(recs); }catch(_){}
+  // 2) バランス走査で {...} を全部抜き出す
+  let depth=0,start=-1;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(c==='{'){ if(depth===0)start=i; depth++; }
+    else if(c==='}'){ depth--; if(depth===0&&start>=0){ const sub=text.slice(start,i+1);
+      try{ push(JSON.parse(sub)); }catch(_){} start=-1; } }
+  }
+  if(recs.length) return normalize(recs);
+  // 3) CSV
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  let header=null;
+  for(const ln of lines){
+    const parts=ln.split(',');
+    if(/lat/i.test(ln)&&/lon/i.test(ln)&&/[a-z]/i.test(ln)){ header=parts.map(s=>s.trim()); continue; }
+    if(parts.length<5)continue;
+    const nums=parts.map(s=>s.trim());
+    let o={};
+    if(header){ header.forEach((h,k)=>o[h]=nums[k]); }
+    else { o={label:nums[0],lat:nums[1],lon:nums[2],gpsAccuracy_m:nums[3],elevation_deg:nums[4],azimuth_deg:nums[5]}; }
+    push(o);
+  }
+  return normalize(recs);
+}
+function num(v){ if(v===''||v==null)return null; const n=+v; return isNaN(n)?null:n; }
+function normalize(raw){
+  // label毎に統合（samplesを結合、単一値は保持）
+  const map=new Map();
+  for(const o of raw){
+    const label=(o.label!=null&&o.label!=='')?String(o.label):('P'+(map.size+1));
+    const key=label;
+    let rec=map.get(key);
+    if(!rec){ rec={label, lat:num(o.lat), lon:num(o.lon), alt:num(o.alt)||0,
+      elevation_deg:num(o.elevation_deg), azimuth_deg:num(o.azimuth_deg), samples:[], use:true}; map.set(key,rec); }
+    if(rec.lat==null)rec.lat=num(o.lat); if(rec.lon==null)rec.lon=num(o.lon);
+    if(rec.elevation_deg==null)rec.elevation_deg=num(o.elevation_deg);
+    if(rec.azimuth_deg==null)rec.azimuth_deg=num(o.azimuth_deg);
+    if(Array.isArray(o.samples)){
+      for(const s of o.samples){ const t=num(s.t),el=num(s.el),az=num(s.az);
+        if(t!=null&&el!=null&&az!=null) rec.samples.push({t,el,az}); }
+    }
+  }
+  const out=[...map.values()];
+  out.forEach(r=>{ r.samples.sort((a,b)=>a.t-b.t);
+    // t を秒へ（msっぽければ /1000）
+    if(r.samples.length){ const span=r.samples[r.samples.length-1].t-r.samples[0].t;
+      if(span>1000) r.samples.forEach(s=>s.t/=1000); }
+  });
+  return out.filter(r=>r.lat!=null&&r.lon!=null);
+}
+
+/* ============================================================
+   状態 & テーブル
+   ============================================================ */
+let RECORDS=[]; let RESULT=null;
+
+function trajMode(){ return RECORDS.filter(r=>r.use&&r.samples.length>=2).length>=2; }
+
+function renderTable(){
+  const traj=trajMode();
+  $('modeChip').innerHTML = traj
+    ? '<span class="modechip chip-traj">軌跡モード（3D）</span>'
+    : '<span class="modechip chip-single">単一点モード（最高点のみ）</span>';
+  const thead=$('tbl').querySelector('thead'), tb=$('tbl').querySelector('tbody');
+  thead.innerHTML='<tr><th>使用</th><th>観測点</th><th>緯度</th><th>経度</th><th>標高m</th>'+
+    (traj?'<th>データ</th>':'<th>仰角°</th><th>方位°</th>')+'</tr>';
+  tb.innerHTML='';
+  RECORDS.forEach((r,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=
+      `<td><input type="checkbox" ${r.use?'checked':''} data-i="${i}" data-f="use"></td>`+
+      `<td><input class="lbl" value="${r.label}" data-i="${i}" data-f="label"></td>`+
+      `<td><input value="${r.lat??''}" data-i="${i}" data-f="lat"></td>`+
+      `<td><input value="${r.lon??''}" data-i="${i}" data-f="lon"></td>`+
+      `<td><input value="${r.alt??0}" data-i="${i}" data-f="alt"></td>`+
+      (traj
+        ? `<td>${r.samples.length?('軌跡 '+r.samples.length+'点'):'—'}</td>`
+        : `<td><input value="${r.elevation_deg??''}" data-i="${i}" data-f="elevation_deg"></td>`+
+          `<td><input value="${r.azimuth_deg??''}" data-i="${i}" data-f="azimuth_deg"></td>`);
+    tb.appendChild(tr);
+  });
+  tb.querySelectorAll('input').forEach(inp=>{
+    inp.addEventListener('change',e=>{
+      const i=+e.target.dataset.i, f=e.target.dataset.f;
+      if(f==='use'){ RECORDS[i].use=e.target.checked; renderTable(); return; }
+      if(f==='label'){ RECORDS[i].label=e.target.value; return; }
+      RECORDS[i][f]=num(e.target.value);
+    });
+  });
+}
+
+$('parseBtn').onclick=()=>{
+  const recs=extractRecords($('input').value);
+  if(!recs.length){ alert('データを読み取れませんでした。JSON/CSVの内容をご確認ください。'); return; }
+  RECORDS=recs; $('tableCard').classList.remove('hidden'); renderTable();
+  $('tableCard').scrollIntoView({behavior:'smooth',block:'start'});
+};
+$('clearBtn').onclick=()=>{ $('input').value=''; };
+$('addRowBtn').onclick=()=>{ RECORDS.push({label:'P'+(RECORDS.length+1),lat:null,lon:null,alt:0,
+  elevation_deg:null,azimuth_deg:null,samples:[],use:true}); renderTable(); };
+
+/* ============================================================
+   計算
+   ============================================================ */
+$('calcBtn').onclick=()=>{ try{ compute(); }catch(e){ alert('計算エラー: '+e.message); console.error(e);} };
+
+function compute(){
+  const used=RECORDS.filter(r=>r.use&&r.lat!=null&&r.lon!=null);
+  if(used.length<2){ alert('有効な観測点が2つ以上必要です。'); return; }
+  const clat=used.reduce((s,r)=>s+r.lat,0)/used.length;
+  const clon=used.reduce((s,r)=>s+r.lon,0)/used.length;
+  used.forEach(r=>{ const e=llToENU(r.lat,r.lon,clat,clon); r.P=[e.E,e.N,r.alt||0]; });
+
+  const traj = used.filter(r=>r.samples.length>=2).length>=2;
+  const warns=[];
+  let out;
+
+  if(traj){
+    const rr=used.filter(r=>r.samples.length>=2);
+    rr.forEach(r=>{ r.series=r.samples.map(s=>({t:s.t,el:s.el,az:s.az})); });
+    // 基準局＝サンプル最多
+    let refIdx=0,mx=-1; rr.forEach((r,i)=>{if(r.samples.length>mx){mx=r.samples.length;refIdx=i;}});
+    // サンプル間隔から dt
+    let sp=[]; rr.forEach(r=>{for(let k=1;k<r.series.length;k++)sp.push(r.series[k].t-r.series[k-1].t);});
+    sp.sort((a,b)=>a-b); const med=sp[sp.length>>1]||0.05;
+    const dt=clampNum(med,0.02,0.1), dtSync=Math.max(dt,0.08);
+    const offs=syncOffsets(rr,refIdx,dtSync);
+    const rec=reconstruct(rr,offs,dt);
+    if(!rec.traj.length){ alert('軌道を復元できませんでした（時刻の重なりが無い可能性）。'); return; }
+    let ap=rec.traj[0]; rec.traj.forEach(p=>{if(p.x[2]>ap.x[2])ap=p;});
+    const launch=rec.traj[0];
+    const drift=Math.hypot(ap.x[0]-launch.x[0], ap.x[1]-launch.x[1]);
+    const apLL=enuToLL(ap.x[0],ap.x[1],clat,clon);
+    out={mode:'traj', alt:ap.x[2], apX:ap.x, apLL, tsec:ap.t-launch.t, drift,
+      mrms:rec.mrms, apRms:ap.rms, traj:rec.traj, stations:rr, clat, clon,
+      offs, refIdx};
+    // 警告
+    if(ap.rms>8) warns.push(['',`apogee付近のRMS残差が大きめ（${ap.rms.toFixed(1)}m）。方位/仰角の精度や時刻同期をご確認ください。`]);
+    if(ap.ranges.some(t=>t<0)) warns.push(['',`一部の視線が後方を向いています（方位180°反転の可能性）。`]);
+    if(ap.x[2]<0) warns.push(['',`高度が負になりました。データ不整合の可能性が高いです。`]);
+  }else{
+    // 単一点モード
+    const rr=used.filter(r=>r.elevation_deg!=null&&r.azimuth_deg!=null);
+    if(rr.length<2){ alert('単一点モードでは、仰角と方位角がそろった観測点が2つ以上必要です。'); return; }
+    const Ps=rr.map(r=>r.P), Ds=rr.map(r=>dirFromAzEl(r.azimuth_deg,r.elevation_deg));
+    const sol=intersectRays(Ps,Ds); if(!sol){ alert('交会に失敗しました。'); return; }
+    const apLL=enuToLL(sol.x[0],sol.x[1],clat,clon);
+    // 打上点の目安＝観測点重心の地上
+    const drift=Math.hypot(sol.x[0],sol.x[1]);
+    out={mode:'single', alt:sol.x[2], apX:sol.x, apLL, tsec:null, drift,
+      mrms:sol.rms, apRms:sol.rms, traj:[{t:0,x:sol.x,rms:sol.rms}], stations:rr, clat, clon};
+    const maxBase=Math.max(...Ps.flatMap((p,i)=>Ps.map(q=>Math.hypot(p[0]-q[0],p[1]-q[1]))));
+    if(Math.abs(sol.det)<1e-3*rr.length) warns.push(['','観測点が一直線／近すぎで幾何が不安定です。配置を広げると精度が上がります。']);
+    if(sol.ranges.some(t=>t<0)) warns.push(['','一部の視線が後方（方位180°反転の可能性）。']);
+    if(sol.x[2]<0) warns.push(['','高度が負。データ不整合の可能性。']);
+    if(sol.rms>15) warns.push(['',`RMS残差が大きい（${sol.rms.toFixed(1)}m）。角度精度をご確認ください。`]);
+  }
+  if(!warns.length) warns.push(['ok','幾何・整合性チェックOK。良好な交会です。']);
+  RESULT=out; renderResult(out,warns); setupView(out);
+}
+
+function fmt(n,d=1){return (n==null||!isFinite(n))?'–':n.toFixed(d);}
+function renderResult(o,warns){
+  $('resultCard').classList.remove('hidden'); $('view3dCard').classList.remove('hidden');
+  $('rAlt').innerHTML = fmt(o.alt,1)+'<small>m</small>';
+  $('rAltFt').textContent = '≈ '+fmt(o.alt*3.28084,0)+' ft';
+  $('rDrift').textContent = fmt(o.drift,1)+' m';
+  $('rMeta').textContent = (o.tsec!=null? ('上昇 '+fmt(o.tsec,1)+' 秒 / '):'') + 'RMS±'+fmt(o.apRms,1)+'m';
+  const kv=[
+    ['モード', o.mode==='traj'?'軌跡3D復元':'最高点1点交会'],
+    ['apogee 緯度', fmt(o.apLL.lat,6)],
+    ['apogee 経度', fmt(o.apLL.lon,6)],
+    ['使用観測点数', String(o.stations.length)],
+    ['平均RMS残差', fmt(o.mrms,2)+' m'],
+    ['apogee水平位置(E,N)', fmt(o.apX[0],1)+', '+fmt(o.apX[1],1)+' m'],
+  ];
+  if(o.mode==='traj') kv.push(['時刻同期補正', o.offs.map((v,i)=>o.stations[i].label+':'+(v>=0?'+':'')+v.toFixed(2)+'s').join('  ')]);
+  $('kvs').innerHTML = kv.map(([k,v])=>`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('');
+  $('warns').innerHTML = warns.map(([c,t])=>`<div class="warn ${c}">${c==='ok'?'✓ ':'⚠ '}${t}</div>`).join('');
+}
+
+/* ============================================================
+   3D ビュー（依存なし・正射投影＋球面カメラ）
+   ============================================================ */
+const V={yaw:0.6,pitch:0.9,scale:1,cx:0,cy:0,cz:0,data:null};
+const cv=$('view'); const ctx=cv.getContext('2d');
+function fitCanvas(){ const r=cv.getBoundingClientRect(); const dpr=Math.min(devicePixelRatio||1,2.5);
+  cv.width=r.width*dpr; cv.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); return {w:r.width,h:r.height}; }
+function project(p){ // p=[E,N,U] relative to center already
+  const cy=Math.cos(V.yaw),sy=Math.sin(V.yaw),cp=Math.cos(V.pitch),sp=Math.sin(V.pitch);
+  const r=[cy,-sy,0];
+  const u=[sy*sp,cy*sp,cp];
+  const f=[cp*sy,cp*cy,-sp];
+  return { x:p[0]*r[0]+p[1]*r[1]+p[2]*r[2], y:p[0]*u[0]+p[1]*u[1]+p[2]*u[2], z:p[0]*f[0]+p[1]*f[1]+p[2]*f[2] };
+}
+function altColor(f){ // 0..1 → 青→緑→黄→赤
+  f=clampNum(f,0,1); const stops=[[59,130,246],[34,211,167],[255,211,90],[255,107,138]];
+  const t=f*3, i=Math.min(2,Math.floor(t)), k=t-i, a=stops[i],b=stops[i+1];
+  return `rgb(${a[0]+(b[0]-a[0])*k|0},${a[1]+(b[1]-a[1])*k|0},${a[2]+(b[2]-a[2])*k|0})`;
+}
+function setupView(o){
+  // 中心と自動スケール
+  const pts=[...o.stations.map(s=>s.P), o.apX, ...o.traj.map(t=>t.x)];
+  let mnE=Infinity,mxE=-Infinity,mnN=Infinity,mxN=-Infinity,mnU=Infinity,mxU=-Infinity;
+  pts.forEach(p=>{mnE=Math.min(mnE,p[0]);mxE=Math.max(mxE,p[0]);mnN=Math.min(mnN,p[1]);mxN=Math.max(mxN,p[1]);mnU=Math.min(mnU,p[2]);mxU=Math.max(mxU,p[2]);});
+  V.cx=(mnE+mxE)/2; V.cy=(mnN+mxN)/2; V.cz=(mnU+mxU)/2;
+  V.data={...o, bounds:{mnE,mxE,mnN,mxN,mnU,mxU}, maxU:Math.max(mxU,1)};
+  const {w,h}=fitCanvas();
+  const ext=Math.max(mxE-mnE,mxN-mnN,mxU-mnU,20);
+  V.baseScale=Math.min(w,h)/(ext*1.5); V.scale=V.baseScale;
+  V.yaw=0.7; V.pitch=0.95; draw();
+}
+function draw(){
+  if(!V.data)return; const {w,h}=fitCanvas(); const cxp=w/2,cyp=h/2;
+  ctx.clearRect(0,0,w,h);
+  const S=p=>{ const q=project([p[0]-V.cx,p[1]-V.cy,p[2]-V.cz]); return [cxp+q.x*V.scale, cyp-q.y*V.scale]; };
+  const {bounds:B,maxU}=V.data;
+  // 地面グリッド
+  const step=niceStep(Math.max(B.mxE-B.mnE,B.mxN-B.mnN)/5);
+  ctx.lineWidth=1; ctx.strokeStyle='rgba(120,150,210,.16)';
+  const e0=Math.floor(B.mnE/step)*step, e1=Math.ceil(B.mxE/step)*step;
+  const n0=Math.floor(B.mnN/step)*step, n1=Math.ceil(B.mxN/step)*step;
+  for(let e=e0;e<=e1+1e-6;e+=step){ const a=S([e,n0,0]),b=S([e,n1,0]); ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke(); }
+  for(let n=n0;n<=n1+1e-6;n+=step){ const a=S([e0,n,0]),b=S([e1,n,0]); ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke(); }
+  // 北矢印
+  const gc=[ (B.mnE+B.mxE)/2, B.mxN, 0 ];
+  const gcS=S(gc), np=S([gc[0],B.mxN+step*0.8,0]);
+  ctx.strokeStyle='rgba(150,180,240,.6)'; ctx.fillStyle='rgba(150,180,240,.85)'; ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(gcS[0],gcS[1]);ctx.lineTo(np[0],np[1]);ctx.stroke();
+  ctx.font='bold 12px system-ui'; ctx.textAlign='center'; ctx.fillText('N',np[0],np[1]-6);
+
+  // apogee 落下線
+  const apG=S([V.data.apX[0],V.data.apX[1],0]), apP=S(V.data.apX);
+  ctx.strokeStyle='rgba(255,107,138,.5)'; ctx.setLineDash([5,5]); ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(apG[0],apG[1]);ctx.lineTo(apP[0],apP[1]);ctx.stroke(); ctx.setLineDash([]);
+
+  // 観測点＋視線（apogeeへ）
+  V.data.stations.forEach(st=>{
+    const s=S(st.P);
+    // 視線: 観測点→apogee
+    ctx.strokeStyle='rgba(139,123,255,.35)'; ctx.lineWidth=1.2;
+    ctx.beginPath();ctx.moveTo(s[0],s[1]);ctx.lineTo(apP[0],apP[1]);ctx.stroke();
+    ctx.fillStyle='#8b7bff'; ctx.beginPath();ctx.arc(s[0],s[1],5,0,7); ctx.fill();
+    ctx.fillStyle='#cdd8f5'; ctx.font='bold 12px system-ui'; ctx.textAlign='left';
+    ctx.fillText(st.label, s[0]+8, s[1]+4);
+  });
+
+  // 軌道（高度カラー）
+  if(V.data.traj.length>1){
+    ctx.lineWidth=3;
+    for(let i=1;i<V.data.traj.length;i++){
+      const a=S(V.data.traj[i-1].x), b=S(V.data.traj[i].x);
+      ctx.strokeStyle=altColor(V.data.traj[i].x[2]/maxU);
+      ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
+    }
+  }
+  // apogee ★
+  drawStar(apP[0],apP[1],9,'#ffd35a');
+  ctx.fillStyle='#fff'; ctx.font='bold 12px system-ui'; ctx.textAlign='left';
+  ctx.fillText(fmt(V.data.alt,0)+' m', apP[0]+11, apP[1]-6);
+
+  // スケールバー
+  const barM=step; const p0=S([B.mnE,B.mnN,0]);
+  const pa=S([B.mnE,B.mnN,0]), pb=S([B.mnE+barM,B.mnN,0]);
+  ctx.strokeStyle='#cdd8f5'; ctx.lineWidth=2; ctx.beginPath();ctx.moveTo(pa[0],pa[1]);ctx.lineTo(pb[0],pb[1]);ctx.stroke();
+  ctx.fillStyle='#cdd8f5'; ctx.font='11px system-ui'; ctx.textAlign='left';
+  ctx.fillText(barM+' m',(pa[0]+pb[0])/2-10,pa[1]+16);
+}
+function niceStep(x){ const p=Math.pow(10,Math.floor(Math.log10(x||1))); const m=x/p;
+  return (m<1.5?1:m<3.5?2:m<7.5?5:10)*p; }
+function drawStar(x,y,r,col){ ctx.fillStyle=col; ctx.beginPath();
+  for(let i=0;i<10;i++){const ang=-Math.PI/2+i*Math.PI/5; const rr=i%2?r*0.45:r; ctx.lineTo(x+Math.cos(ang)*rr,y+Math.sin(ang)*rr);} ctx.closePath();ctx.fill(); }
+
+// 操作
+let drag=null;
+cv.addEventListener('pointerdown',e=>{ drag={x:e.clientX,y:e.clientY}; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove',e=>{ if(!drag)return; const dx=e.clientX-drag.x,dy=e.clientY-drag.y; drag={x:e.clientX,y:e.clientY};
+  V.yaw+=dx*0.01; V.pitch=clampNum(V.pitch-dy*0.01,0.12,1.5); draw(); });
+cv.addEventListener('pointerup',()=>drag=null); cv.addEventListener('pointercancel',()=>drag=null);
+cv.addEventListener('wheel',e=>{ e.preventDefault(); V.scale=clampNum(V.scale*(e.deltaY<0?1.1:0.9),V.baseScale*0.2,V.baseScale*12); draw(); },{passive:false});
+// ピンチ
+let pinch=null;
+cv.addEventListener('touchstart',e=>{ if(e.touches.length===2){ pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);} },{passive:false});
+cv.addEventListener('touchmove',e=>{ if(e.touches.length===2&&pinch){ e.preventDefault();
+  const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+  V.scale=clampNum(V.scale*d/pinch,V.baseScale*0.2,V.baseScale*12); pinch=d; draw(); } },{passive:false});
+cv.addEventListener('touchend',()=>pinch=null);
+$('resetView').onclick=()=>{ V.yaw=0.7;V.pitch=0.95;V.scale=V.baseScale; draw(); };
+$('topView').onclick=()=>{ V.yaw=0;V.pitch=1.4;V.scale=V.baseScale; draw(); };
+window.addEventListener('resize',()=>{ if(V.data)draw(); });
+
+/* ============================================================
+   コピー & サンプル
+   ============================================================ */
+$('copyBtn').onclick=async()=>{
+  if(!RESULT){ alert('先に計算してください'); return; }
+  const o=RESULT;
+  const txt=`ロケット高度計算結果
+最高到達高度: ${fmt(o.alt,1)} m (${fmt(o.alt*3.28084,0)} ft)
+apogee: ${fmt(o.apLL.lat,6)}, ${fmt(o.apLL.lon,6)}
+水平ドリフト: ${fmt(o.drift,1)} m
+${o.tsec!=null?'上昇時間: '+fmt(o.tsec,1)+' 秒\n':''}平均RMS残差: ${fmt(o.mrms,2)} m / モード: ${o.mode}`;
+  try{ await navigator.clipboard.writeText(txt); alert('コピーしました'); }catch(_){ alert('コピーできませんでした'); }
+};
+
+// デモ（物理モデルで3局の時系列を生成）
+$('demoBtn').onclick=()=>{ $('input').value=JSON.stringify(genDemo()); };
+function genDemo(){
+  const g=9.8,v0=Math.sqrt(2*g*280),tA=v0/g,fs=15,tEnd=1.8*tA;
+  const lat0=35.681,lon0=139.767;
+  const truth=t=>({E:1.2*t*t,N:0.5*t*t,U:Math.max(0,v0*t-0.5*g*t*t)});
+  const stE={A:[-140,-190],B:[210,-160],C:[0,240]};
+  const clock={A:0,B:0.3,C:-0.2};
+  const rnd=(seed=>()=>{ seed=(seed*9301+49297)%233280; return seed/233280; })(7);
+  const nz=()=>(rnd()-0.5)*0.6;
+  const recs=[];
+  for(const nm of ['A','B','C']){
+    const [sE,sN]=stE[nm]; const lat=lat0+sN/111320, lon=lon0+sE/(111320*Math.cos(lat0*Math.PI/180));
+    const samples=[];
+    for(let i=0;i<=tEnd*fs;i++){ const tt=i/fs,p=truth(tt); if(p.U<=1)continue;
+      const dE=p.E-sE,dN=p.N-sN,h=Math.hypot(dE,dN); const el=Math.atan2(p.U,h)*180/Math.PI; if(el<3)continue;
+      let az=Math.atan2(dE,dN)*180/Math.PI; az=((az%360)+360)%360;
+      samples.push({t:Math.round((tt+clock[nm])*1000), el:+(el+nz()).toFixed(2), az:+(az+nz()).toFixed(2)}); }
+    recs.push({label:nm,lat:+lat.toFixed(6),lon:+lon.toFixed(6),elevation_deg:samples.length?samples.reduce((m,s)=>Math.max(m,s.el),0):null,azimuth_deg:null,samples});
+  }
+  return recs;
+}
+</script>
+</body>
+</html>
