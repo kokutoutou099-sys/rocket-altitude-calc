@@ -63,6 +63,11 @@
   .modechip{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:3px 9px;}
   .chip-traj{background:#5ef0c022;color:var(--accent);border:1px solid #5ef0c055;}
   .chip-single{background:#ffd35a22;color:var(--amber);border:1px solid #ffd35a55;}
+  .posmode{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 12px;}
+  .posmode .pml{font-size:12px;color:var(--dim);}
+  .seg{height:34px;padding:0 13px;border-radius:10px;font-size:12.5px;font-weight:700;cursor:pointer;
+    background:rgba(255,255,255,.06);color:#cdd8f5;border:1px solid var(--stroke);}
+  .seg.on{background:linear-gradient(150deg,var(--accent2),#6a5cff);color:#fff;border:none;}
 
   /* 結果 */
   .bigwrap{display:flex;flex-wrap:wrap;gap:14px;align-items:stretch;}
@@ -122,13 +127,20 @@
   <!-- 観測点テーブル -->
   <section class="card hidden" id="tableCard">
     <h2><span class="n">2</span> 観測点 <span id="modeChip"></span></h2>
+    <div class="posmode">
+      <span class="pml">位置の指定：</span>
+      <button class="seg on" id="posGps">GPS（緯度経度）</button>
+      <button class="seg" id="posManual">手入力 東x・北y（m）</button>
+    </div>
     <div class="tblwrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
     <div class="btnrow">
       <button class="btn" id="calcBtn">高度を計算</button>
       <button class="btn ghost sm" id="addRowBtn">行を追加</button>
     </div>
     <p class="hint">「使用」のチェックで各観測点の有効/無効を切替。標高(m)は観測点の海抜差（平地なら0でOK）。
-      単一点モードでは仰角・方位角を直接編集できます。</p>
+      単一点モードでは仰角・方位角を直接編集できます。<br>
+      <b>手入力（東x・北y）</b>：GPSを使わず、任意の基準点（例：打上げ台）からの相対位置をメジャー実測で入力。
+      東＝右方向+、北＝奥方向+。<b>観測点間隔が狭い(10m規模)ときはGPSより高精度</b>です。</p>
   </section>
 
   <!-- 結果 -->
@@ -291,9 +303,10 @@ function normalize(raw){
     const label=(o.label!=null&&o.label!=='')?String(o.label):('P'+(map.size+1));
     const key=label;
     let rec=map.get(key);
-    if(!rec){ rec={label, lat:num(o.lat), lon:num(o.lon), alt:num(o.alt)||0,
+    if(!rec){ rec={label, lat:num(o.lat), lon:num(o.lon), x:num(o.x), y:num(o.y), alt:num(o.alt)||0,
       elevation_deg:num(o.elevation_deg), azimuth_deg:num(o.azimuth_deg), samples:[], use:true}; map.set(key,rec); }
     if(rec.lat==null)rec.lat=num(o.lat); if(rec.lon==null)rec.lon=num(o.lon);
+    if(rec.x==null)rec.x=num(o.x); if(rec.y==null)rec.y=num(o.y);
     if(rec.elevation_deg==null)rec.elevation_deg=num(o.elevation_deg);
     if(rec.azimuth_deg==null)rec.azimuth_deg=num(o.azimuth_deg);
     if(Array.isArray(o.samples)){
@@ -307,13 +320,22 @@ function normalize(raw){
     if(r.samples.length){ const span=r.samples[r.samples.length-1].t-r.samples[0].t;
       if(span>1000) r.samples.forEach(s=>s.t/=1000); }
   });
-  return out.filter(r=>r.lat!=null&&r.lon!=null);
+  // 角度データか位置のどちらかがある行を残す（手入力モードでGPS欠落でも可）
+  return out.filter(r=> r.samples.length>0 || r.elevation_deg!=null || (r.lat!=null&&r.lon!=null) || (r.x!=null&&r.y!=null));
 }
 
 /* ============================================================
    状態 & テーブル
    ============================================================ */
-let RECORDS=[]; let RESULT=null;
+let RECORDS=[]; let RESULT=null; let POSMODE='gps';   // 'gps' | 'manual'
+
+function setPosMode(m){ POSMODE=m;
+  $('posGps').classList.toggle('on', m==='gps');
+  $('posManual').classList.toggle('on', m==='manual');
+  if(RECORDS.length) renderTable();
+}
+$('posGps').onclick=()=>setPosMode('gps');
+$('posManual').onclick=()=>setPosMode('manual');
 
 function trajMode(){ return RECORDS.filter(r=>r.use&&r.samples.length>=2).length>=2; }
 
@@ -322,17 +344,23 @@ function renderTable(){
   $('modeChip').innerHTML = traj
     ? '<span class="modechip chip-traj">軌跡モード（3D）</span>'
     : '<span class="modechip chip-single">単一点モード（最高点のみ）</span>';
+  const man=POSMODE==='manual';
   const thead=$('tbl').querySelector('thead'), tb=$('tbl').querySelector('tbody');
-  thead.innerHTML='<tr><th>使用</th><th>観測点</th><th>緯度</th><th>経度</th><th>標高m</th>'+
+  thead.innerHTML='<tr><th>使用</th><th>観測点</th>'+
+    (man?'<th>東x m</th><th>北y m</th>':'<th>緯度</th><th>経度</th>')+'<th>標高m</th>'+
     (traj?'<th>データ</th>':'<th>仰角°</th><th>方位°</th>')+'</tr>';
   tb.innerHTML='';
   RECORDS.forEach((r,i)=>{
     const tr=document.createElement('tr');
+    const posCells = man
+      ? `<td><input value="${r.x??''}" data-i="${i}" data-f="x"></td>`+
+        `<td><input value="${r.y??''}" data-i="${i}" data-f="y"></td>`
+      : `<td><input value="${r.lat??''}" data-i="${i}" data-f="lat"></td>`+
+        `<td><input value="${r.lon??''}" data-i="${i}" data-f="lon"></td>`;
     tr.innerHTML=
       `<td><input type="checkbox" ${r.use?'checked':''} data-i="${i}" data-f="use"></td>`+
       `<td><input class="lbl" value="${r.label}" data-i="${i}" data-f="label"></td>`+
-      `<td><input value="${r.lat??''}" data-i="${i}" data-f="lat"></td>`+
-      `<td><input value="${r.lon??''}" data-i="${i}" data-f="lon"></td>`+
+      posCells+
       `<td><input value="${r.alt??0}" data-i="${i}" data-f="alt"></td>`+
       (traj
         ? `<td>${r.samples.length?('軌跡 '+r.samples.length+'点'):'—'}</td>`
@@ -357,7 +385,7 @@ $('parseBtn').onclick=()=>{
   $('tableCard').scrollIntoView({behavior:'smooth',block:'start'});
 };
 $('clearBtn').onclick=()=>{ $('input').value=''; };
-$('addRowBtn').onclick=()=>{ RECORDS.push({label:'P'+(RECORDS.length+1),lat:null,lon:null,alt:0,
+$('addRowBtn').onclick=()=>{ RECORDS.push({label:'P'+(RECORDS.length+1),lat:null,lon:null,x:null,y:null,alt:0,
   elevation_deg:null,azimuth_deg:null,samples:[],use:true}); renderTable(); };
 
 /* ============================================================
@@ -366,11 +394,19 @@ $('addRowBtn').onclick=()=>{ RECORDS.push({label:'P'+(RECORDS.length+1),lat:null
 $('calcBtn').onclick=()=>{ try{ compute(); }catch(e){ alert('計算エラー: '+e.message); console.error(e);} };
 
 function compute(){
-  const used=RECORDS.filter(r=>r.use&&r.lat!=null&&r.lon!=null);
-  if(used.length<2){ alert('有効な観測点が2つ以上必要です。'); return; }
-  const clat=used.reduce((s,r)=>s+r.lat,0)/used.length;
-  const clon=used.reduce((s,r)=>s+r.lon,0)/used.length;
-  used.forEach(r=>{ const e=llToENU(r.lat,r.lon,clat,clon); r.P=[e.E,e.N,r.alt||0]; });
+  const geo = POSMODE==='gps';
+  let used, clat=null, clon=null;
+  if(geo){
+    used=RECORDS.filter(r=>r.use&&r.lat!=null&&r.lon!=null);
+    if(used.length<2){ alert('GPS(緯度経度)が入った観測点が2つ以上必要です。狭い配置なら「手入力」モードが正確です。'); return; }
+    clat=used.reduce((s,r)=>s+r.lat,0)/used.length;
+    clon=used.reduce((s,r)=>s+r.lon,0)/used.length;
+    used.forEach(r=>{ const e=llToENU(r.lat,r.lon,clat,clon); r.P=[e.E,e.N,r.alt||0]; });
+  }else{
+    used=RECORDS.filter(r=>r.use&&r.x!=null&&r.y!=null);
+    if(used.length<2){ alert('手入力モードでは、東x・北y が入った観測点が2つ以上必要です。'); return; }
+    used.forEach(r=>{ r.P=[r.x, r.y, r.alt||0]; });
+  }
 
   const traj = used.filter(r=>r.samples.length>=2).length>=2;
   const warns=[];
@@ -391,8 +427,8 @@ function compute(){
     let ap=rec.traj[0]; rec.traj.forEach(p=>{if(p.x[2]>ap.x[2])ap=p;});
     const launch=rec.traj[0];
     const drift=Math.hypot(ap.x[0]-launch.x[0], ap.x[1]-launch.x[1]);
-    const apLL=enuToLL(ap.x[0],ap.x[1],clat,clon);
-    out={mode:'traj', alt:ap.x[2], apX:ap.x, apLL, tsec:ap.t-launch.t, drift,
+    const apLL=geo?enuToLL(ap.x[0],ap.x[1],clat,clon):null;
+    out={mode:'traj', geo, alt:ap.x[2], apX:ap.x, apLL, tsec:ap.t-launch.t, drift,
       mrms:rec.mrms, apRms:ap.rms, traj:rec.traj, stations:rr, clat, clon,
       offs, refIdx};
     // 警告
@@ -405,10 +441,10 @@ function compute(){
     if(rr.length<2){ alert('単一点モードでは、仰角と方位角がそろった観測点が2つ以上必要です。'); return; }
     const Ps=rr.map(r=>r.P), Ds=rr.map(r=>dirFromAzEl(r.azimuth_deg,r.elevation_deg));
     const sol=intersectRays(Ps,Ds); if(!sol){ alert('交会に失敗しました。'); return; }
-    const apLL=enuToLL(sol.x[0],sol.x[1],clat,clon);
-    // 打上点の目安＝観測点重心の地上
+    const apLL=geo?enuToLL(sol.x[0],sol.x[1],clat,clon):null;
+    // 打上点の目安＝観測点重心（GPS）／基準点原点（手入力）の地上
     const drift=Math.hypot(sol.x[0],sol.x[1]);
-    out={mode:'single', alt:sol.x[2], apX:sol.x, apLL, tsec:null, drift,
+    out={mode:'single', geo, alt:sol.x[2], apX:sol.x, apLL, tsec:null, drift,
       mrms:sol.rms, apRms:sol.rms, traj:[{t:0,x:sol.x,rms:sol.rms}], stations:rr, clat, clon};
     const maxBase=Math.max(...Ps.flatMap((p,i)=>Ps.map(q=>Math.hypot(p[0]-q[0],p[1]-q[1]))));
     if(Math.abs(sol.det)<1e-3*rr.length) warns.push(['','観測点が一直線／近すぎで幾何が不安定です。配置を広げると精度が上がります。']);
@@ -428,13 +464,14 @@ function renderResult(o,warns){
   $('rDrift').textContent = fmt(o.drift,1)+' m';
   $('rMeta').textContent = (o.tsec!=null? ('上昇 '+fmt(o.tsec,1)+' 秒 / '):'') + 'RMS±'+fmt(o.apRms,1)+'m';
   const kv=[
-    ['モード', o.mode==='traj'?'軌跡3D復元':'最高点1点交会'],
-    ['apogee 緯度', fmt(o.apLL.lat,6)],
-    ['apogee 経度', fmt(o.apLL.lon,6)],
+    ['モード', (o.mode==='traj'?'軌跡3D復元':'最高点1点交会')+(o.geo?'':'／手入力位置')],
+  ];
+  if(o.apLL) kv.push(['apogee 緯度', fmt(o.apLL.lat,6)], ['apogee 経度', fmt(o.apLL.lon,6)]);
+  kv.push(
     ['使用観測点数', String(o.stations.length)],
     ['平均RMS残差', fmt(o.mrms,2)+' m'],
-    ['apogee水平位置(E,N)', fmt(o.apX[0],1)+', '+fmt(o.apX[1],1)+' m'],
-  ];
+    [o.geo?'apogee水平位置(E,N)':'apogee 位置(東x,北y)', fmt(o.apX[0],1)+', '+fmt(o.apX[1],1)+' m'],
+  );
   if(o.mode==='traj') kv.push(['時刻同期補正', o.offs.map((v,i)=>o.stations[i].label+':'+(v>=0?'+':'')+v.toFixed(2)+'s').join('  ')]);
   $('kvs').innerHTML = kv.map(([k,v])=>`<div class="kv"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('');
   $('warns').innerHTML = warns.map(([c,t])=>`<div class="warn ${c}">${c==='ok'?'✓ ':'⚠ '}${t}</div>`).join('');
@@ -556,11 +593,13 @@ window.addEventListener('resize',()=>{ if(V.data)draw(); });
 $('copyBtn').onclick=async()=>{
   if(!RESULT){ alert('先に計算してください'); return; }
   const o=RESULT;
+  const apLine = o.apLL ? `apogee: ${fmt(o.apLL.lat,6)}, ${fmt(o.apLL.lon,6)}`
+                        : `apogee位置(東x,北y): ${fmt(o.apX[0],1)}, ${fmt(o.apX[1],1)} m`;
   const txt=`ロケット高度計算結果
 最高到達高度: ${fmt(o.alt,1)} m (${fmt(o.alt*3.28084,0)} ft)
-apogee: ${fmt(o.apLL.lat,6)}, ${fmt(o.apLL.lon,6)}
+${apLine}
 水平ドリフト: ${fmt(o.drift,1)} m
-${o.tsec!=null?'上昇時間: '+fmt(o.tsec,1)+' 秒\n':''}平均RMS残差: ${fmt(o.mrms,2)} m / モード: ${o.mode}`;
+${o.tsec!=null?'上昇時間: '+fmt(o.tsec,1)+' 秒\n':''}平均RMS残差: ${fmt(o.mrms,2)} m / モード: ${o.mode}${o.geo?'':'（手入力位置）'}`;
   try{ await navigator.clipboard.writeText(txt); alert('コピーしました'); }catch(_){ alert('コピーできませんでした'); }
 };
 
