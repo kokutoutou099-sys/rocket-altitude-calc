@@ -133,6 +133,12 @@
       <button class="seg" id="posDist">距離（台まで m）</button>
       <button class="seg" id="posManual">座標（東x・北y m）</button>
     </div>
+    <div class="posmode">
+      <span class="pml">復元方式：</span>
+      <button class="seg on" id="mHybrid">併用（仰角重視）</button>
+      <button class="seg" id="mElev">仰角のみ</button>
+      <button class="seg" id="mRays">視線交差（方位）</button>
+    </div>
     <div class="tblwrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
     <div class="btnrow">
       <button class="btn" id="calcBtn">高度を計算</button>
@@ -142,7 +148,10 @@
       単一点モードでは仰角・方位角を直接編集できます。<br>
       <b>距離（台まで）</b>：入力は<b>打上げ台までの距離だけ</b>。位置は「台への方位（計測開始時にカメラを台へ向けた向き）×距離」で自動配置。
       <b>10m規模の近距離配置に最適</b>（座標計算不要）。方位＝コンパス依存なので各端末は8の字校正推奨。<br>
-      <b>座標（東x・北y）</b>：任意の基準点からの相対位置をメジャー実測で入力（東＝右+, 北＝奥+）。方位に依存せず最も厳密。</p>
+      <b>座標（東x・北y）</b>：任意の基準点からの相対位置をメジャー実測で入力（東＝右+, 北＝奥+）。方位に依存せず最も厳密。<br>
+      <b>復元方式</b>：スマホの方位角はWebでは不安定なため、既定の<b>「併用（仰角重視）」</b>は正確な仰角を主に・方位を弱く使って解きます。
+      <b>「仰角のみ」</b>（3点以上）は方位を完全に無視するため、方位が大きくズレていても正しく解けます。
+      「視線交差（方位）」は従来方式（方位が正確な場合のみ）。</p>
   </section>
 
   <!-- 結果 -->
@@ -216,6 +225,76 @@ function intersectRays(Ps,Ds){
     ss+=p[0]*p[0]+p[1]*p[1]+p[2]*p[2]; ts.push(t);}
   return {x, rms:Math.sqrt(ss/Ps.length), det, ranges:ts};
 }
+/* --- 仰角(強)＋方位(弱)の重み付き最小二乗で1点を解く（ガウス・ニュートン） ---
+   Ps:観測点[E,N,U], els:仰角deg, azs:方位deg(nullは不使用), wAz:方位の重み(0=無視)
+   仰角は重力由来で傾きに依らず正確、方位はWebでは不安定 → 仰角主体で解く。3点以上の仰角で(x,y,z)が一意。 */
+const wrapRad=a=>Math.atan2(Math.sin(a),Math.cos(a));
+/* 併用時は2段構え：まず仰角のみで解き、その予測方位と大きく食い違う方位（反転・大誤差）を
+   外れ値として棄却してから弱く併用（グロス誤差に頑健） */
+function solvePoint(Ps,els,azs,wAz,X0){
+  if(wAz>0 && Ps.length>=3){
+    const base=solvePointCore(Ps,els,azs.map(()=>null),0,X0);
+    if(base){
+      const vet=azs.map((az,k)=>{
+        if(az==null) return null;
+        const dx=base.x[0]-Ps[k][0], dy=base.x[1]-Ps[k][1];
+        const d=wrapRad((az-Math.atan2(dx,dy)*R2D)*D2R)*R2D;
+        return Math.abs(d)>25 ? null : az;     // 25°超のズレ＝方位の故障とみなす
+      });
+      return solvePointCore(Ps,els,vet,wAz,base.x);
+    }
+  }
+  return solvePointCore(Ps,els,azs,wAz,X0);
+}
+function solvePointCore(Ps,els,azs,wAz,X0){
+  let X=X0?X0.slice():[0,0,100];
+  for(let it=0;it<15;it++){
+    let M=[1e-8,0,0,0,1e-8,0,0,0,1e-8], g=[0,0,0];
+    for(let k=0;k<Ps.length;k++){
+      const P=Ps[k], dx=X[0]-P[0], dy=X[1]-P[1], dz=X[2]-P[2];
+      const h2=dx*dx+dy*dy, h=Math.sqrt(h2), r2=h2+dz*dz;
+      if(r2<1e-6||h<1e-6) continue;
+      const R=Math.sqrt(r2);
+      // 仰角残差（×斜距離R でメートル相当に重み付け：条件数も安定）
+      const rEl=wrapRad(els[k]*D2R - Math.atan2(dz,h))*R;
+      const Je=[-dz*dx/(h*r2)*R, -dz*dy/(h*r2)*R, h/r2*R];
+      for(let a=0;a<3;a++){ g[a]+=Je[a]*rEl; for(let b=0;b<3;b++) M[a*3+b]+=Je[a]*Je[b]; }
+      // 方位残差（×水平距離h、重みwAz）
+      if(wAz>0 && azs[k]!=null){
+        const rAz=wrapRad(azs[k]*D2R - Math.atan2(dx,dy))*h, w2=wAz*wAz;
+        const Ja=[dy/h2*h, -dx/h2*h, 0];
+        for(let a=0;a<3;a++){ g[a]+=w2*Ja[a]*rAz; for(let b=0;b<3;b++) M[a*3+b]+=w2*Ja[a]*Ja[b]; }
+      }
+    }
+    // LM減衰（特異な幾何での暴走防止）
+    const tr=(M[0]+M[4]+M[8])/3;
+    M[0]+=1e-4*tr; M[4]+=1e-4*tr; M[8]+=1e-4*tr;
+    const s=solve3x3(M,g); if(!s.x) return null;
+    // ステップ制限（発散防止）
+    const st=Math.hypot(s.x[0],s.x[1],s.x[2]), cap=120;
+    const f=st>cap?cap/st:1;
+    X=[X[0]+s.x[0]*f, X[1]+s.x[1]*f, X[2]+s.x[2]*f];
+    if(st<1e-4) break;
+  }
+  if(X[2]<-50) return null;   // 地下深くへ発散＝偽解
+  // 残差（メートル相当）と観測点別 仰角残差(度)
+  let ss=0,n=0; const elRes=[];
+  for(let k=0;k<Ps.length;k++){
+    const P=Ps[k], dx=X[0]-P[0], dy=X[1]-P[1], dz=X[2]-P[2];
+    const h=Math.hypot(dx,dy), R=Math.hypot(h,dz);
+    const dEl=wrapRad(els[k]*D2R-Math.atan2(dz,h));
+    elRes.push(dEl*R2D);
+    ss+=(dEl*R)*(dEl*R); n++;
+    if(wAz>0 && azs[k]!=null){ const dAz=wrapRad(azs[k]*D2R-Math.atan2(dx,dy)); ss+=(wAz*dAz*h)*(wAz*dAz*h); }
+  }
+  if(!n||!isFinite(X[0]+X[1]+X[2])) return null;
+  return {x:X, rms:Math.sqrt(ss/n), elRes};
+}
+// 初期値：打上げ台(原点)直上、高さは各点の 水平距離×tan(仰角) の中央値
+function guessPoint(Ps,els){
+  const hs=Ps.map((P,k)=>Math.hypot(P[0],P[1])*Math.tan(clampNum(els[k],1,88)*D2R)).sort((a,b)=>a-b);
+  return [0,0,Math.max(hs[hs.length>>1]||50,5)];
+}
 function interpAt(S,t){
   if(!S.length||t<S[0].t||t>S[S.length-1].t)return null;
   let lo=0,hi=S.length-1; while(hi-lo>1){const m=(lo+hi)>>1; if(S[m].t<=t)lo=m; else hi=m;}
@@ -231,14 +310,26 @@ function reconstruct(recs,offs,dt){
   let g0=-Infinity,g1=Infinity;
   al.forEach(s=>{if(!s.length)return; g0=Math.max(g0,s[0].t); g1=Math.min(g1,s[s.length-1].t);});
   if(!isFinite(g0)||g1<=g0) return {traj:[],mrms:Infinity};
-  const traj=[]; let ss=0,n=0;
+  const traj=[]; let ss=0,n=0,prevX=null;
   for(let t=g0;t<=g1+1e-9;t+=dt){
-    const Ps=[],Ds=[],idx=[];
+    const Ps=[],els=[],azs=[],idx=[];
     for(let i=0;i<recs.length;i++){const s=interpAt(al[i],t);if(!s)continue;
-      Ps.push(recs[i].P);Ds.push(dirFromAzEl(s.az,s.el));idx.push(i);}
+      Ps.push(recs[i].P);els.push(s.el);azs.push(s.az);idx.push(i);}
     if(Ps.length<2)continue;
-    const sol=intersectRays(Ps,Ds); if(!sol)continue;
-    traj.push({t,x:sol.x,rms:sol.rms,k:Ps.length,det:sol.det,ranges:sol.ranges,idx}); ss+=sol.rms*sol.rms;n++;
+    let sol=null;
+    if(METHOD==='rays'){
+      const r=intersectRays(Ps, els.map((e,k)=>dirFromAzEl(azs[k],e)));
+      if(r) sol={x:r.x,rms:r.rms,det:r.det,ranges:r.ranges};
+    }else{
+      const wAz=(METHOD==='hybrid')?W_AZ:0;
+      if(wAz===0 && Ps.length<3) continue;   // 仰角のみは3点以上必要
+      if(Math.max(...els)<3) continue;       // 全局ほぼ水平＝地上付近は幾何が縮退
+      const r=solvePoint(Ps,els,azs,wAz, prevX||guessPoint(Ps,els));
+      if(r && r.rms<100) sol={x:r.x,rms:r.rms,elRes:r.elRes};  // 壊れた解は捨てて汚染防止
+    }
+    if(!sol||!isFinite(sol.rms))continue;
+    prevX=sol.x;
+    traj.push({t,x:sol.x,rms:sol.rms,k:Ps.length,det:sol.det,ranges:sol.ranges,elRes:sol.elRes,idx}); ss+=sol.rms*sol.rms;n++;
   }
   return {traj,mrms:n?Math.sqrt(ss/n):Infinity};
 }
@@ -331,6 +422,17 @@ function normalize(raw){
    状態 & テーブル
    ============================================================ */
 let RECORDS=[]; let RESULT=null; let POSMODE='gps';   // 'gps' | 'dist' | 'manual'
+let METHOD='hybrid';                                  // 'hybrid' | 'elev' | 'rays'
+const W_AZ=0.15;                                      // 併用時の方位の重み（仰角=1に対し弱く）
+
+function setMethod(m){ METHOD=m;
+  $('mHybrid').classList.toggle('on', m==='hybrid');
+  $('mElev').classList.toggle('on', m==='elev');
+  $('mRays').classList.toggle('on', m==='rays');
+}
+$('mHybrid').onclick=()=>setMethod('hybrid');
+$('mElev').onclick=()=>setMethod('elev');
+$('mRays').onclick=()=>setMethod('rays');
 
 function setPosMode(m){ POSMODE=m;
   $('posGps').classList.toggle('on', m==='gps');
@@ -433,6 +535,7 @@ function compute(){
 
   if(traj){
     const rr=used.filter(r=>r.samples.length>=2);
+    if(METHOD==='elev' && rr.length<3){ alert('「仰角のみ」は観測点3つ以上が必要です（2点なら「併用」を使ってください）。'); return; }
     rr.forEach(r=>{ r.series=r.samples.map(s=>({t:s.t,el:s.el,az:s.az})); });
     // 基準局＝サンプル最多
     let refIdx=0,mx=-1; rr.forEach((r,i)=>{if(r.samples.length>mx){mx=r.samples.length;refIdx=i;}});
@@ -447,27 +550,43 @@ function compute(){
     const launch=rec.traj[0];
     const drift=Math.hypot(ap.x[0]-launch.x[0], ap.x[1]-launch.x[1]);
     const apLL=geo?enuToLL(ap.x[0],ap.x[1],clat,clon):null;
-    out={mode:'traj', geo, posmode:POSMODE, alt:ap.x[2], apX:ap.x, apLL, tsec:ap.t-launch.t, drift,
-      mrms:rec.mrms, apRms:ap.rms, traj:rec.traj, stations:rr, clat, clon,
+    out={mode:'traj', geo, posmode:POSMODE, method:METHOD, alt:ap.x[2], apX:ap.x, apLL, tsec:ap.t-launch.t, drift,
+      mrms:rec.mrms, apRms:ap.rms, apElRes:ap.elRes||null, apIdx:ap.idx, traj:rec.traj, stations:rr, clat, clon,
       offs, refIdx};
     // 警告
-    if(ap.rms>8) warns.push(['',`apogee付近のRMS残差が大きめ（${ap.rms.toFixed(1)}m）。方位/仰角の精度や時刻同期をご確認ください。`]);
-    if(ap.ranges.some(t=>t<0)) warns.push(['',`一部の視線が後方を向いています（方位180°反転の可能性）。`]);
+    if(ap.rms>8) warns.push(['',`apogee付近のRMS残差が大きめ（${ap.rms.toFixed(1)}m）。仰角の精度・観測点位置・時刻同期をご確認ください。`]);
+    if(ap.ranges&&ap.ranges.some(t=>t<0)) warns.push(['',`一部の視線が後方を向いています（方位180°反転の可能性）。「併用」か「仰角のみ」推奨。`]);
     if(ap.x[2]<0) warns.push(['',`高度が負になりました。データ不整合の可能性が高いです。`]);
+    if(METHOD!=='rays' && ap.elRes && Math.max(...ap.elRes.map(Math.abs))>3)
+      warns.push(['',`仰角残差が大きい観測点があります（観測点位置のズレ、または追尾外れの可能性）。`]);
   }else{
     // 単一点モード
-    const rr=used.filter(r=>r.elevation_deg!=null&&r.azimuth_deg!=null);
-    if(rr.length<2){ alert('単一点モードでは、仰角と方位角がそろった観測点が2つ以上必要です。'); return; }
-    const Ps=rr.map(r=>r.P), Ds=rr.map(r=>dirFromAzEl(r.azimuth_deg,r.elevation_deg));
-    const sol=intersectRays(Ps,Ds); if(!sol){ alert('交会に失敗しました。'); return; }
+    let sol=null, rr, elResOut=null;
+    if(METHOD==='rays'){
+      rr=used.filter(r=>r.elevation_deg!=null&&r.azimuth_deg!=null);
+      if(rr.length<2){ alert('視線交差では、仰角と方位角がそろった観測点が2つ以上必要です。'); return; }
+      const Ps=rr.map(r=>r.P), Ds=rr.map(r=>dirFromAzEl(r.azimuth_deg,r.elevation_deg));
+      const s=intersectRays(Ps,Ds); if(!s){ alert('交会に失敗しました。'); return; }
+      sol={x:s.x,rms:s.rms,det:s.det,ranges:s.ranges};
+      if(Math.abs(s.det)<1e-3*rr.length) warns.push(['','観測点が一直線／近すぎで幾何が不安定です。配置を広げると精度が上がります。']);
+      if(s.ranges.some(t=>t<0)) warns.push(['','一部の視線が後方（方位180°反転の可能性）。「併用」か「仰角のみ」推奨。']);
+    }else{
+      rr=used.filter(r=>r.elevation_deg!=null);
+      const wAz=(METHOD==='hybrid')?W_AZ:0;
+      const need=(wAz===0)?3:2;
+      if(rr.length<need){ alert(`この方式では仰角が入った観測点が${need}つ以上必要です。`); return; }
+      const Ps=rr.map(r=>r.P), els=rr.map(r=>r.elevation_deg),
+            azs=rr.map(r=>r.azimuth_deg??null);
+      const s=solvePoint(Ps,els,azs,wAz,guessPoint(Ps,els));
+      if(!s){ alert('解けませんでした。観測点の配置（三角形状・十分な間隔）をご確認ください。'); return; }
+      sol={x:s.x,rms:s.rms}; elResOut=s.elRes;
+      if(Math.max(...s.elRes.map(Math.abs))>3) warns.push(['','仰角残差が大きい観測点があります（観測点位置のズレの可能性）。']);
+    }
     const apLL=geo?enuToLL(sol.x[0],sol.x[1],clat,clon):null;
     // 打上点の目安＝観測点重心（GPS）／基準点原点（手入力）の地上
     const drift=Math.hypot(sol.x[0],sol.x[1]);
-    out={mode:'single', geo, posmode:POSMODE, alt:sol.x[2], apX:sol.x, apLL, tsec:null, drift,
-      mrms:sol.rms, apRms:sol.rms, traj:[{t:0,x:sol.x,rms:sol.rms}], stations:rr, clat, clon};
-    const maxBase=Math.max(...Ps.flatMap((p,i)=>Ps.map(q=>Math.hypot(p[0]-q[0],p[1]-q[1]))));
-    if(Math.abs(sol.det)<1e-3*rr.length) warns.push(['','観測点が一直線／近すぎで幾何が不安定です。配置を広げると精度が上がります。']);
-    if(sol.ranges.some(t=>t<0)) warns.push(['','一部の視線が後方（方位180°反転の可能性）。']);
+    out={mode:'single', geo, posmode:POSMODE, method:METHOD, alt:sol.x[2], apX:sol.x, apLL, tsec:null, drift,
+      mrms:sol.rms, apRms:sol.rms, apElRes:elResOut, traj:[{t:0,x:sol.x,rms:sol.rms}], stations:rr, clat, clon};
     if(sol.x[2]<0) warns.push(['','高度が負。データ不整合の可能性。']);
     if(sol.rms>15) warns.push(['',`RMS残差が大きい（${sol.rms.toFixed(1)}m）。角度精度をご確認ください。`]);
   }
@@ -483,9 +602,15 @@ function renderResult(o,warns){
   $('rDrift').textContent = fmt(o.drift,1)+' m';
   $('rMeta').textContent = (o.tsec!=null? ('上昇 '+fmt(o.tsec,1)+' 秒 / '):'') + 'RMS±'+fmt(o.apRms,1)+'m';
   const posName = o.geo?'':(o.posmode==='dist'?'／距離入力':'／座標入力');
+  const mName = {hybrid:'併用（仰角重視）',elev:'仰角のみ',rays:'視線交差（方位）'}[o.method]||'';
   const kv=[
     ['モード', (o.mode==='traj'?'軌跡3D復元':'最高点1点交会')+posName],
+    ['復元方式', mName],
   ];
+  if(o.apElRes){
+    const st=o.apIdx? o.apIdx.map(i=>o.stations[i]) : o.stations;
+    kv.push(['apogee 仰角残差', o.apElRes.map((v,i)=>(st[i]?st[i].label:'?')+':'+fmt(v,1)+'°').join('　')]);
+  }
   if(o.apLL) kv.push(['apogee 緯度', fmt(o.apLL.lat,6)], ['apogee 経度', fmt(o.apLL.lon,6)]);
   kv.push(
     ['使用観測点数', String(o.stations.length)],
